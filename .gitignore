@@ -1,0 +1,13 @@
+# General
+.DS_Store
+*.log
+.vscode/
+
+# AWS
+.aws-sam/
+.chalice/
+
+# Secrets / Config
+parameters-*.json
+*.secret
+credentials
