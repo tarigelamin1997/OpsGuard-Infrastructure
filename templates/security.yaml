@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Layer 2: Security. Creates the KMS Encryption Keys, IAM Roles for EC2,
+  and Security Groups for the Load Balancer and App Servers.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC ID from the Network Stack
+  
+  EnvironmentType:
+    Type: String
+    Default: Dev
+    AllowedValues: [Dev, Prod]
+
+Resources:
+  # ==========================================
+  # 1. KMS Key (The "Vault Lock")
+  # Encrypts S3 objects and EBS volumes
+  # ==========================================
+  OpsGuardKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: "Encryption key for OpsGuard Data"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: key-default-1
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: kms:*
+            Resource: '*'
+
+  OpsGuardKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/OpsGuardKey
+      TargetKeyId: !Ref OpsGuardKey
+
+  # ==========================================
+  # 2. Security Groups (The "Firewall")
+  # ==========================================
+  
+  # A. Load Balancer SG: Accepts traffic from the Internet
+  LBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP traffic from world to ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: OpsGuard-LB-SG
+
+  # B. App Server SG: Accepts traffic ONLY from the Load Balancer
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow traffic only from ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref LBSecurityGroup
+      # Allow SSM Agent to talk to AWS (Outbound 443)
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: OpsGuard-App-SG
+
+  # ==========================================
+  # 3. IAM Role (The "ID Badge")
+  # Allows EC2 to talk to S3, CloudWatch, and SSM
+  # ==========================================
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess # We can tighten this later
+      Policies:
+        - PolicyName: KMSEncryptionAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !GetAtt OpsGuardKey.Arn
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2Role
+
+Outputs:
+  KmsKeyArn:
+    Description: ARN of the KMS Key
+    Value: !GetAtt OpsGuardKey.Arn
+
+  AppSecurityGroup:
+    Description: Security Group ID for App Servers
+    Value: !Ref AppSecurityGroup
+    
+  LBSecurityGroup:
+    Description: Security Group ID for Load Balancer
+    Value: !Ref LBSecurityGroup
+
+  InstanceProfileName:
+    Description: IAM Instance Profile for EC2
+    Value: !Ref EC2InstanceProfile

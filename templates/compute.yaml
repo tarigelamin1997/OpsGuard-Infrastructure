@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Layer 3: Compute. Creates the Application Load Balancer, Launch Template,
+  and Auto Scaling Group with Self-Healing Policies.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets for the Load Balancer (Must be Public)
+
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets for the App Servers (Must be Private)
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+
+  LBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+  
+  InstanceProfileName:
+    Type: String
+    Description: The IAM Instance Profile from the Security Stack
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: SSH Key for emergency debugging (optional)
+
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    Description: Automatically grabs the latest Amazon Linux 2 AMI
+
+Resources:
+  # ==========================================
+  # 1. Application Load Balancer (Public)
+  # ==========================================
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: OpsGuard-ALB
+      Subnets: !Ref PublicSubnetIds
+      SecurityGroups: 
+        - !Ref LBSecurityGroup
+      Scheme: internet-facing
+      Type: application
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: OpsGuard-TG
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      HealthCheckPath: /index.html
+      HealthCheckIntervalSeconds: 15
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+
+  # ==========================================
+  # 2. Launch Template (The Blueprint)
+  # Installs Apache, CloudWatch Agent, and SSM
+  # ==========================================
+  AppLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: OpsGuard-Template
+      LaunchTemplateData:
+        ImageId: !Ref LatestAmiId
+        InstanceType: t3.micro
+        KeyName: !Ref KeyName
+        IamInstanceProfile:
+          Name: !Ref InstanceProfileName
+        SecurityGroupIds: 
+          - !Ref AppSecurityGroup
+        # UserData: Bootstraps the server
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install -y httpd amazon-cloudwatch-agent
+            systemctl start httpd
+            systemctl enable httpd
+            
+            # Create a simple "Hello" page for the Health Check
+            echo "<h1>OpsGuard Secure Vault - Active</h1>" > /var/www/html/index.html
+            echo "Instance ID: $(curl -s http://169.254.169.254/latest/meta-data/instance-id)" >> /var/www/html/index.html
+
+            # Start CloudWatch Agent (Basic Config)
+            /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+            -a fetch-config -m ec2 -c ssm:AmazonCloudWatch-Config -s
+
+  # ==========================================
+  # 3. Auto Scaling Group (The "Self-Healing" Engine)
+  # ==========================================
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: OpsGuard-ASG
+      LaunchTemplate:
+        LaunchTemplateId: !Ref AppLaunchTemplate
+        Version: !GetAtt AppLaunchTemplate.LatestVersionNumber
+      MinSize: 2
+      MaxSize: 4
+      DesiredCapacity: 2
+      VPCZoneIdentifier: !Ref PrivateSubnetIds
+      TargetGroupARNs: 
+        - !Ref ALBTargetGroup
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+
+  # ==========================================
+  # 4. Scaling Policies (Dynamic Scaling)
+  # ==========================================
+  ScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 70.0  # Scale up if CPU > 70%
+
+Outputs:
+  LoadBalancerDNS:
+    Description: The Public URL of the OpsGuard Platform
+    Value: !GetAtt LoadBalancer.DNSName
