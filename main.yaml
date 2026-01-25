@@ -1,0 +1,71 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  OpsGuard Master Stack: Orchestrates the secure deployment of the Network, 
+  Security, Storage, and Compute layers.
+
+# 1. Global Parameters (Passed down to all children)
+Parameters:
+  EnvironmentType:
+    Type: String
+    Default: Dev
+    AllowedValues: [Dev, Prod]
+    Description: Defines the scale (t3.micro for Dev, t3.medium for Prod)
+  
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair for emergency SSH access
+
+  S3TemplateBucket:
+    Type: String
+    Description: The S3 Bucket where your child templates (network.yaml, app.yaml) are stored.
+
+Resources:
+  # ======================================================
+  # LAYER 1: NETWORKING (The Foundation)
+  # Creates VPC, Subnets, Internet Gateway, NAT Gateway
+  # ======================================================
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${S3TemplateBucket}.s3.amazonaws.com/templates/network.yaml"
+      Parameters:
+        VpcCIDR: 10.0.0.0/16
+        EnvironmentType: !Ref EnvironmentType
+
+  # ======================================================
+  # LAYER 2: SECURITY & STORAGE (The Vault)
+  # Creates KMS Keys, IAM Roles, Security Groups, S3 Buckets
+  # DependsOn: NetworkStack (needs VPC ID for Security Groups)
+  # ======================================================
+  SecurityStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkStack
+    Properties:
+      TemplateURL: !Sub "https://${S3TemplateBucket}.s3.amazonaws.com/templates/security.yaml"
+      Parameters:
+        VpcId: !GetAtt NetworkStack.Outputs.VpcId
+        EnvironmentType: !Ref EnvironmentType
+
+  # ======================================================
+  # LAYER 3: COMPUTE & APP (The Engine)
+  # Creates ALB, Auto Scaling Group, CloudWatch Alarms
+  # DependsOn: SecurityStack (needs KMS keys & IAM roles)
+  # ======================================================
+  ComputeStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: SecurityStack
+    Properties:
+      TemplateURL: !Sub "https://${S3TemplateBucket}.s3.amazonaws.com/templates/compute.yaml"
+      Parameters:
+        VpcId: !GetAtt NetworkStack.Outputs.VpcId
+        PrivateSubnetIds: !GetAtt NetworkStack.Outputs.PrivateSubnetIds
+        PublicSubnetIds: !GetAtt NetworkStack.Outputs.PublicSubnetIds
+        AppSecurityGroup: !GetAtt SecurityStack.Outputs.AppSecurityGroup
+        KmsKeyArn: !GetAtt SecurityStack.Outputs.KmsKeyArn
+        KeyName: !Ref KeyName
+
+Outputs:
+  # The "Crown Jewel" Output - The only link the user needs
+  OpsGuardLoginURL:
+    Description: "The secure Load Balancer URL for the OpsGuard Platform"
+    Value: !GetAtt ComputeStack.Outputs.LoadBalancerDNS
