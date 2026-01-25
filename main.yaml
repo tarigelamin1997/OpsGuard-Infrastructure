@@ -73,11 +73,13 @@ Resources:
         PrivateSubnetIds: !GetAtt NetworkStack.Outputs.PrivateSubnetIds
         PublicSubnetIds: !GetAtt NetworkStack.Outputs.PublicSubnetIds
         AppSecurityGroup: !GetAtt SecurityStack.Outputs.AppSecurityGroup
-        KmsKeyArn: !GetAtt SecurityStack.Outputs.KmsKeyArn
+
         KeyName: !Ref KeyName
         CertificateArn: !Ref CertificateArn
         HostedZoneId: !Ref HostedZoneId
         DomainName: !Ref DomainName
+        LBSecurityGroup: !GetAtt SecurityStack.Outputs.LBSecurityGroup
+        InstanceProfileName: !GetAtt SecurityStack.Outputs.InstanceProfileName
 
 Outputs:
   # The "Crown Jewel" Output - The only link the user needs
