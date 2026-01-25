@@ -34,6 +34,18 @@ Parameters:
     Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
     Description: Automatically grabs the latest Amazon Linux 2 AMI
 
+  CertificateArn:
+    Type: String
+    Description: The SSL Certificate ARN
+
+  HostedZoneId:
+    Type: String
+    Description: The Route 53 Hosted Zone ID
+
+  DomainName:
+    Type: String
+    Description: The domain name (e.g., example.com)
+
 Resources:
   # ==========================================
   # 1. Application Load Balancer (Public)
@@ -57,6 +69,18 @@ Resources:
       LoadBalancerArn: !Ref LoadBalancer
       Port: 80
       Protocol: HTTP
+
+  HTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
 
   ALBTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -135,6 +159,20 @@ Resources:
         PredefinedMetricSpecification:
           PredefinedMetricType: ASGAverageCPUUtilization
         TargetValue: 70.0  # Scale up if CPU > 70%
+
+  # ==========================================
+  # 5. Route 53 Record (The "Friendly Name")
+  # ==========================================
+  DnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Comment: "DNS Redirect to the Load Balancer"
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+        DNSName: !GetAtt LoadBalancer.DNSName
 
 Outputs:
   LoadBalancerDNS:

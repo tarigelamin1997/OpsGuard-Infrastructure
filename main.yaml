@@ -17,7 +17,23 @@ Parameters:
 
   S3TemplateBucket:
     Type: String
+    Default: opsguard-artifacts-tarig-soa
     Description: The S3 Bucket where your child templates (network.yaml, app.yaml) are stored.
+
+  CertificateArn:
+    Type: String
+    Default: arn:aws:acm:us-east-1:058727361540:certificate/6cffb5ab-e7b7-46dd-91b6-d86b9d70f559
+    Description: The ACM Certificate ARN for the domain.
+
+  HostedZoneId:
+    Type: String
+    Default: Z0632178PMBW7D5V1BWF
+    Description: The Route 53 Hosted Zone ID for the domain.
+    
+  DomainName:
+    Type: String
+    Default: tarigelamin.com
+    Description: The domain name to map to the Load Balancer (e.g., app.example.com).
 
 Resources:
   # ======================================================
@@ -63,6 +79,9 @@ Resources:
         AppSecurityGroup: !GetAtt SecurityStack.Outputs.AppSecurityGroup
         KmsKeyArn: !GetAtt SecurityStack.Outputs.KmsKeyArn
         KeyName: !Ref KeyName
+        CertificateArn: !Ref CertificateArn
+        HostedZoneId: !Ref HostedZoneId
+        DomainName: !Ref DomainName
 
 Outputs:
   # The "Crown Jewel" Output - The only link the user needs
