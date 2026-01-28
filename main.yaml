@@ -30,6 +30,10 @@ Parameters:
   DomainName:
     Type: String
     Description: The domain name to map to the Load Balancer (e.g., app.example.com).
+  
+  AppRepositoryUrl:
+    Type: String
+    Description: Git URL to clone (e.g. https://github.com/user/portfolio.git)
 
 Resources:
   # ======================================================
@@ -80,6 +84,7 @@ Resources:
         DomainName: !Ref DomainName
         LBSecurityGroup: !GetAtt SecurityStack.Outputs.LBSecurityGroup
         InstanceProfileName: !GetAtt SecurityStack.Outputs.InstanceProfileName
+        AppRepositoryUrl: !Ref AppRepositoryUrl
 
 Outputs:
   # The "Crown Jewel" Output - The only link the user needs

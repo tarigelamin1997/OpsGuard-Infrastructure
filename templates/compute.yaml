@@ -45,6 +45,10 @@ Parameters:
   DomainName:
     Type: String
     Description: The domain name (e.g., example.com)
+  
+  AppRepositoryUrl:
+    Type: String
+    Description: Git URL to clone app code from
 
 Resources:
   # ==========================================
@@ -107,6 +111,7 @@ Resources:
         ImageId: !Ref LatestAmiId
         InstanceType: t3.micro
         KeyName: !Ref KeyName
+        # AppRepositoryUrl is used in UserData below
         IamInstanceProfile:
           Name: !Ref InstanceProfileName
         SecurityGroupIds: 
@@ -121,8 +126,22 @@ Resources:
             systemctl enable httpd
             
             # Create a simple "Hello" page for the Health Check
-            echo "<h1>OpsGuard Secure Vault - Active</h1>" > /var/www/html/index.html
-            echo "Instance ID: $(curl -s http://169.254.169.254/latest/meta-data/instance-id)" >> /var/www/html/index.html
+            # echo "<h1>OpsGuard Secure Vault - Active</h1>" > /var/www/html/index.html
+            
+            # --- App Deployment ---
+            yum install -y git
+            
+            # Clone the Repo (Deploying the App)
+            cd /var/www/html
+            git clone ${AppRepositoryUrl} .
+            
+            # If no index exists, make one to confirm it worked
+            if [ ! -f index.html ]; then
+              echo "<h1>OpsGuard: Repo Cloned Successfully</h1>" > index.html
+              echo "<p>Repository: ${AppRepositoryUrl}</p>" >> index.html
+            fi
+            
+            echo "Instance ID: $(curl -s http://169.254.169.254/latest/meta-data/instance-id)" >> instance_id.html
 
             # Start CloudWatch Agent (Basic Config)
             /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
