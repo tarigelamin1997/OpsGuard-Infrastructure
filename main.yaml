@@ -1,7 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: >
-  OpsGuard Master Stack: Orchestrates the secure deployment of the Network, 
-  Security, Storage, and Compute layers.
+Description: OpsGuard Infrastructure - Master Template (v1.0.2 - Force Build Update)
 
 # 1. Global Parameters (Passed down to all children)
 Parameters:

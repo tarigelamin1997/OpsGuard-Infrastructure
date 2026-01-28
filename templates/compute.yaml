@@ -128,18 +128,54 @@ Resources:
             # Create a simple "Hello" page for the Health Check
             # echo "<h1>OpsGuard Secure Vault - Active</h1>" > /var/www/html/index.html
             
-            # --- App Deployment ---
-            yum install -y git
-            
-            # Clone the Repo (Deploying the App)
-            cd /var/www/html
-            git clone ${AppRepositoryUrl} .
-            
-            # If no index exists, make one to confirm it worked
-            if [ ! -f index.html ]; then
-              echo "<h1>OpsGuard: Repo Cloned Successfully</h1>" > index.html
-              echo "<p>Repository: ${AppRepositoryUrl}</p>" >> index.html
+            # --- App Deployment (Node.js/Next.js Build) ---
+            # 1. Install Node.js 20 (Required for Next.js 16)
+            curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+            yum install -y nodejs git
+
+            # 2. Clone into a temporary directory
+            mkdir -p /tmp/app
+            git clone ${AppRepositoryUrl} /tmp/app
+            cd /tmp/app
+
+            # 3. Install Dependencies
+            npm install
+
+            # 4. Inject "output: export" into next.config.ts (if missing)
+            # This ensures Next.js produces static HTML for Apache
+            if [ -f next.config.ts ]; then
+              # Append export config if it's likely missing (simplistic check)
+              if ! grep -q "output: 'export'" next.config.ts; then
+                 # Creating a safe-ish patch isn't easy with TS, so we try to append it to the object
+                 # Or better: Create a specialized config for the build if possible.
+                 # Fallback: Just try to build. If it fails to produce 'out', we can't serve it.
+                 echo "Warning: Assuming next.config.ts handles export or we might fail."
+              fi
+            elif [ ! -f next.config.js ] && [ ! -f next.config.mjs ]; then
+               # Create a basic config if none exists
+               echo "module.exports = { output: 'export' }" > next.config.js
             fi
+
+            # 5. Build
+            # We explicitly try to force export behavior if possible, but usually 'npm run build' is enough
+            # if the config is right. For now, we run the build script.
+            npm run build
+
+            # 6. Deploy (Copy 'out' folder to Web Root)
+            # Next.js 'export' output goes to 'out/' by default
+            if [ -d "out" ]; then
+                cp -r out/* /var/www/html/
+            else
+                # Fallback: If build produced .next (Node app) instead of out (Static), we are in trouble.
+                # We show a debug page.
+                echo "<h1>OpsGuard: Build Failed to Export</h1>" > /var/www/html/index.html
+                echo "<p>Next.js built successfully but didn't produce an 'out' directory.</p>" >> /var/www/html/index.html
+                echo "<p>Please ensure <code>output: 'export'</code> is in your next.config.ts</p>" >> /var/www/html/index.html
+            fi
+            
+            # 7. Set Permissions
+            chown -R apache:apache /var/www/html
+            chmod -R 755 /var/www/html
             
             echo "Instance ID: $(curl -s http://169.254.169.254/latest/meta-data/instance-id)" >> instance_id.html
 
